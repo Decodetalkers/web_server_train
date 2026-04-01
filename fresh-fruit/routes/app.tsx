@@ -1,7 +1,6 @@
 import { define } from "../utils.ts";
 
 export default define.page(function App({ Component }) {
-
   return (
     <html>
       <head>
