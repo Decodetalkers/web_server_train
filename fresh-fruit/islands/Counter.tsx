@@ -6,15 +6,29 @@ interface CounterProps {
   count: Signal<number>;
 }
 
-function draw() {
+async function draw() {
   const canvas = document.getElementById("video") as HTMLCanvasElement;
-  const ctx = canvas.getContext("2d")!;
 
-  ctx.fillStyle = "rgb(200 0 0)";
-  ctx.fillRect(10, 10, 50, 50);
+  const gpu = navigator.gpu;
+  const adapter = await gpu.requestAdapter();
+  const device = await adapter?.requestDevice();
+  const context = canvas.getContext("webgpu")! as unknown as GPUCanvasContext;
+  const canvasFormat = gpu.getPreferredCanvasFormat();
+  context.configure({ device: device!, format: canvasFormat });
+  const encoder = device!.createCommandEncoder();
 
-  ctx.fillStyle = "rgb(0 0 200 / 50%)";
-  ctx.fillRect(30, 30, 50, 50);
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: context.getCurrentTexture().createView(),
+      loadOp: "clear",
+      clearValue: { r: 0.3, g: 0, b: 0.4, a: 1.0 },
+      storeOp: "store",
+    }],
+  });
+
+  pass.end();
+
+  device!.queue.submit([encoder.finish()]);
 }
 
 export default function Counter(props: CounterProps) {
