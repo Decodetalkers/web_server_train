@@ -2,6 +2,8 @@ import { type Signal, useSignal } from "@preact/signals";
 import { Button } from "../components/Button.tsx";
 import { useEffect } from "preact/hooks";
 
+import shader from "./shader.wgsl?raw";
+
 interface CounterProps {
   count: Signal<number>;
 }
@@ -11,10 +13,10 @@ async function draw() {
 
   const gpu = navigator.gpu;
   const adapter = await gpu.requestAdapter();
-  const device = await adapter?.requestDevice();
+  const device = await adapter?.requestDevice()!;
   const context = canvas.getContext("webgpu")! as unknown as GPUCanvasContext;
   const canvasFormat = gpu.getPreferredCanvasFormat();
-  context.configure({ device: device!, format: canvasFormat });
+  context.configure({ device: device, format: canvasFormat });
 
   // deno-fmt-ignore
   const vertices = new Float32Array([
@@ -27,12 +29,12 @@ async function draw() {
     0.8,       0.8,
     -0.8,      0.8,
   ]);
-  const vertexBuffer = device!.createBuffer({
+  const vertexBuffer = device.createBuffer({
     label: "Cell vertices",
     size: vertices.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
   });
-  device!.queue.writeBuffer(vertexBuffer, 0, vertices);
+  device.queue.writeBuffer(vertexBuffer, 0, vertices);
 
   const vertexBufferLayout: GPUVertexBufferLayout = {
     arrayStride: 8,
@@ -44,24 +46,13 @@ async function draw() {
   };
 
   // Create the shader that will render the cells.
-  const cellShaderModule = device!.createShaderModule({
+  const cellShaderModule = device.createShaderModule({
     label: "Cell shader",
-    code: `
-          @vertex
-          fn vertexMain(@location(0) position: vec2f)
-            -> @builtin(position) vec4f {
-            return vec4f(position, 0, 1);
-          }
-
-          @fragment
-          fn fragmentMain() -> @location(0) vec4f {
-            return vec4f(1, 0, 0, 1);
-          }
-        `,
+    code: shader,
   });
 
   // Create a pipeline that renders the cell.
-  const cellPipeline = device!.createRenderPipeline({
+  const cellPipeline = device.createRenderPipeline({
     label: "Cell pipeline",
     layout: "auto",
     vertex: {
@@ -79,7 +70,7 @@ async function draw() {
   });
 
   // Clear the canvas with a render pass
-  const encoder = device!.createCommandEncoder();
+  const encoder = device.createCommandEncoder();
 
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
@@ -97,22 +88,22 @@ async function draw() {
 
   pass.end();
 
-  device!.queue.submit([encoder.finish()]);
+  device.queue.submit([encoder.finish()]);
 }
 
 export default function Counter(props: CounterProps) {
   const title = useSignal("default");
 
   useEffect(() => {
-    const wsUrl = "ws://localhost:3000/ws";
+    //const wsUrl = "ws://localhost:3000/ws";
 
-    const wsListener = new WebSocket(wsUrl);
-    wsListener.addEventListener("message", (event) => {
-      title.value = event.data;
-    });
+    //const wsListener = new WebSocket(wsUrl);
+    //wsListener.addEventListener("message", (event) => {
+    //  title.value = event.data;
+    //});
     draw();
     return () => {
-      wsListener.close();
+      //wsListener.close();
     };
   }, []);
   return (
