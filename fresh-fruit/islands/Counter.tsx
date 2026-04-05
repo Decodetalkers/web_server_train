@@ -69,7 +69,7 @@ async function draw() {
     },
   });
 
-  const GRID_SIZE = 4;
+  const GRID_SIZE = 32;
   const uniformArray = new Float32Array([GRID_SIZE, GRID_SIZE]);
   const uniformBuffer = device.createBuffer({
     label: "Grid Uniforms",
@@ -138,8 +138,8 @@ export default function Counter(props: CounterProps) {
         <p class="text-3xl tabular-nums">{title.value}</p>
         <canvas
           id="video"
-          width="150"
-          height="150"
+          width="512"
+          height="512"
           class="max-w-full max-h-full"
         />
       </div>
