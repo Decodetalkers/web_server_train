@@ -69,6 +69,24 @@ async function draw() {
     },
   });
 
+  const GRID_SIZE = 4;
+  const uniformArray = new Float32Array([GRID_SIZE, GRID_SIZE]);
+  const uniformBuffer = device.createBuffer({
+    label: "Grid Uniforms",
+    size: uniformArray.byteLength,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(uniformBuffer, 0, uniformArray);
+
+  const bindGroup = device.createBindGroup({
+    label: "Cell renderer bind group",
+    layout: cellPipeline.getBindGroupLayout(0),
+    entries: [{
+      binding: 0,
+      resource: { buffer: uniformBuffer },
+    }],
+  });
+
   // Clear the canvas with a render pass
   const encoder = device.createCommandEncoder();
 
@@ -84,7 +102,13 @@ async function draw() {
   // Draw the square.
   pass.setPipeline(cellPipeline);
   pass.setVertexBuffer(0, vertexBuffer);
-  pass.draw(vertices.length / 2);
+
+  pass.setBindGroup(0, bindGroup);
+
+  const instanceCount = GRID_SIZE * GRID_SIZE;
+
+  // Because channels is two, so we divide it to two
+  pass.draw(vertices.length / 2, instanceCount);
 
   pass.end();
 
