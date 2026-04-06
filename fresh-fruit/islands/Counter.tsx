@@ -7,8 +7,35 @@ import shader from "./shader.wgsl?raw";
 interface CounterProps {
   count: Signal<number>;
 }
+async function loadPlane(src: string) {
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, img.width, img.height);
+
+  // Extract R channel → 1 byte per pixel
+  const out = new Uint8Array(img.width * img.height);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = imageData.data[i * 4];
+  }
+
+  canvas.remove();
+  return { data: out, width: img.width, height: img.height };
+}
 
 async function draw() {
+  const datay = await loadPlane("/cat-y.jpg");
+  const datau = await loadPlane("/cat-u.jpg");
+  const datav = await loadPlane("/cat-v.jpg");
+
   const canvas = document.getElementById("video") as HTMLCanvasElement;
 
   const gpu = navigator.gpu;
@@ -18,97 +45,233 @@ async function draw() {
   const canvasFormat = gpu.getPreferredCanvasFormat();
   context.configure({ device: device, format: canvasFormat });
 
-  // deno-fmt-ignore
-  const vertices = new Float32Array([
-    // X,      Y
-    -0.8,     -0.8, // Triangle 1
-    0.8,      -0.8,
-    0.8,      0.8,
-
-    -0.8,     -0.8, // Triangle 2
-    0.8,       0.8,
-    -0.8,      0.8,
-  ]);
-  const vertexBuffer = device.createBuffer({
-    label: "Cell vertices",
-    size: vertices.byteLength,
-    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(vertexBuffer, 0, vertices);
-
-  const vertexBufferLayout: GPUVertexBufferLayout = {
-    arrayStride: 8,
-    attributes: [{
-      format: "float32x2",
-      offset: 0,
-      shaderLocation: 0, // Position. Matches @location(0) in the @vertex shader.
-    }],
-  };
-
-  // Create the shader that will render the cells.
-  const cellShaderModule = device.createShaderModule({
+  const pipeLineShader = device.createShaderModule({
     label: "Cell shader",
     code: shader,
   });
 
-  // Create a pipeline that renders the cell.
-  const cellPipeline = device.createRenderPipeline({
-    label: "Cell pipeline",
-    layout: "auto",
+  const uniform = new Float32Array(256 / 4);
+  uniform.set([0, 0, datay.width, datay.height]);
+  console.log(uniform.length);
+
+  const texture_y = device.createTexture({
+    label: "y",
+    size: {
+      width: datay.width,
+      height: datay.height,
+    },
+    mipLevelCount: 1,
+    sampleCount: 1,
+    dimension: "2d",
+    format: "r8unorm",
+    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+    viewFormats: [],
+  });
+  const texture_u = device.createTexture({
+    label: "u",
+    size: {
+      width: datau.width,
+      height: datau.height,
+      depthOrArrayLayers: 1,
+    },
+    mipLevelCount: 1,
+    sampleCount: 1,
+    dimension: "2d",
+    format: "r8unorm",
+    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+    viewFormats: [],
+  });
+  const texture_v = device.createTexture({
+    label: "v",
+    size: {
+      width: datav.width,
+      height: datav.height,
+      depthOrArrayLayers: 1,
+    },
+    mipLevelCount: 1,
+    sampleCount: 1,
+    dimension: "2d",
+    format: "r8unorm",
+    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+    viewFormats: [],
+  });
+
+  const view_y = texture_y.createView({
+    label: "y texture view",
+    aspect: "all",
+    baseMipLevel: 0,
+  });
+  const view_u = texture_u.createView({
+    label: "u texture view",
+    aspect: "all",
+    baseMipLevel: 0,
+  });
+  const view_v = texture_v.createView({
+    label: "v texture view",
+    aspect: "all",
+    baseMipLevel: 0,
+  });
+  const instance = device.createBuffer({
+    label: "yuv uniform buffer",
+    size: uniform.byteLength * 256,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
+    mappedAtCreation: false,
+  });
+
+  device.queue.writeBuffer(instance, 0, uniform);
+  const bg0_layout = device.createBindGroupLayout({
+    label: "bind group 0 layout",
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.FRAGMENT,
+        texture: {
+          sampleType: "float",
+          viewDimension: "2d",
+          multisampled: false,
+        },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.FRAGMENT,
+        texture: {
+          sampleType: "float",
+          viewDimension: "2d",
+          multisampled: false,
+        },
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.FRAGMENT,
+        texture: {
+          sampleType: "float",
+          viewDimension: "2d",
+          multisampled: false,
+        },
+      },
+      {
+        binding: 3,
+        visibility: GPUShaderStage.FRAGMENT,
+        sampler: {
+          type: "filtering",
+        },
+      },
+      {
+        binding: 4,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: {
+          type: "uniform",
+          hasDynamicOffset: false,
+        },
+      },
+    ],
+  });
+
+  const layout = device.createPipelineLayout({
+    label: "video pipeline layout",
+    bindGroupLayouts: [bg0_layout],
+  });
+
+  const pipeline = device.createRenderPipeline({
+    label: "video player pipeline",
+    layout: layout,
     vertex: {
-      module: cellShaderModule,
-      entryPoint: "vertexMain",
-      buffers: [vertexBufferLayout],
+      module: pipeLineShader,
+      entryPoint: "vs_main",
+    },
+    multisample: {
+      count: 1,
+      mask: 1,
+      alphaToCoverageEnabled: false,
     },
     fragment: {
-      module: cellShaderModule,
-      entryPoint: "fragmentMain",
+      module: pipeLineShader,
+      entryPoint: "fs_main",
       targets: [{
         format: canvasFormat,
+        writeMask: GPUColorWrite.ALL,
       }],
     },
   });
 
-  const GRID_SIZE = 32;
-  const uniformArray = new Float32Array([GRID_SIZE, GRID_SIZE]);
-  const uniformBuffer = device.createBuffer({
-    label: "Grid Uniforms",
-    size: uniformArray.byteLength,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(uniformBuffer, 0, uniformArray);
-
-  const bindGroup = device.createBindGroup({
-    label: "Cell renderer bind group",
-    layout: cellPipeline.getBindGroupLayout(0),
-    entries: [{
-      binding: 0,
-      resource: { buffer: uniformBuffer },
-    }],
+  const sampler = device.createSampler({
+    label: "yuv sampler",
+    addressModeU: "clamp-to-edge",
+    addressModeV: "clamp-to-edge",
+    addressModeW: "clamp-to-edge",
+    magFilter: "linear",
+    minFilter: "linear",
+    lodMinClamp: 0.0,
+    lodMaxClamp: 1.0,
+    maxAnisotropy: 1,
   });
 
-  // Clear the canvas with a render pass
+  const bind_group = device.createBindGroup({
+    label: "video bind group",
+    layout: bg0_layout,
+    entries: [
+      { binding: 0, resource: view_y },
+      { binding: 1, resource: view_u },
+      { binding: 2, resource: view_v },
+      { binding: 3, resource: sampler },
+      {
+        binding: 4,
+        resource: {
+          buffer: instance,
+          offset: 0,
+          size: uniform.byteLength,
+        },
+      },
+    ],
+  });
+
+  device.queue.writeTexture(
+    {
+      texture: texture_y,
+      mipLevel: 0,
+      origin: { x: 0, y: 0, z: 0 },
+      aspect: "all",
+    },
+    datay.data,
+    { offset: 0, bytesPerRow: datay.width, rowsPerImage: datay.height },
+    { width: datay.height, height: datay.height, depthOrArrayLayers: 1 },
+  );
+  device.queue.writeTexture(
+    {
+      texture: texture_u,
+      mipLevel: 0,
+      origin: { x: 0, y: 0, z: 0 },
+      aspect: "all",
+    },
+    datau.data,
+    { offset: 0, bytesPerRow: datau.width, rowsPerImage: datau.height },
+    { width: datau.height, height: datau.height, depthOrArrayLayers: 1 },
+  );
+  device.queue.writeTexture(
+    {
+      texture: texture_v,
+      mipLevel: 0,
+      origin: { x: 0, y: 0, z: 0 },
+      aspect: "all",
+    },
+    datav.data,
+    { offset: 0, bytesPerRow: datav.width, rowsPerImage: datav.height },
+    { width: datav.height, height: datav.height, depthOrArrayLayers: 1 },
+  );
+
   const encoder = device.createCommandEncoder();
 
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
       view: context.getCurrentTexture().createView(),
-      loadOp: "clear",
-      clearValue: { r: 0, g: 0, b: 0.4, a: 1.0 },
+      loadOp: "load",
       storeOp: "store",
     }],
   });
 
-  // Draw the square.
-  pass.setPipeline(cellPipeline);
-  pass.setVertexBuffer(0, vertexBuffer);
-
-  pass.setBindGroup(0, bindGroup);
-
-  const instanceCount = GRID_SIZE * GRID_SIZE;
-
-  // Because channels is two, so we divide it to two
-  pass.draw(vertices.length / 2, instanceCount);
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bind_group);
+  pass.draw(6, 1);
 
   pass.end();
 
