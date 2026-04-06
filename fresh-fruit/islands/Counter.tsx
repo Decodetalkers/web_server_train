@@ -51,8 +51,12 @@ async function draw() {
   });
 
   const uniform = new Float32Array(256 / 4);
-  uniform.set([0, 0, datay.width, datay.height]);
-  console.log(uniform.length);
+  uniform.set([
+    -1 * datay.width / 2,
+    -1 * datay.height / 2,
+    datay.width / 2,
+    datay.height / 2,
+  ]);
 
   const texture_y = device.createTexture({
     label: "y",
@@ -113,7 +117,7 @@ async function draw() {
   });
   const instance = device.createBuffer({
     label: "yuv uniform buffer",
-    size: uniform.byteLength * 256,
+    size: uniform.byteLength,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
     mappedAtCreation: false,
   });
@@ -161,7 +165,7 @@ async function draw() {
         visibility: GPUShaderStage.VERTEX,
         buffer: {
           type: "uniform",
-          hasDynamicOffset: false,
+          hasDynamicOffset: true,
         },
       },
     ],
@@ -234,7 +238,7 @@ async function draw() {
     },
     datay.data,
     { offset: 0, bytesPerRow: datay.width, rowsPerImage: datay.height },
-    { width: datay.height, height: datay.height, depthOrArrayLayers: 1 },
+    { width: datay.width, height: datay.height, depthOrArrayLayers: 1 },
   );
   device.queue.writeTexture(
     {
@@ -245,7 +249,7 @@ async function draw() {
     },
     datau.data,
     { offset: 0, bytesPerRow: datau.width, rowsPerImage: datau.height },
-    { width: datau.height, height: datau.height, depthOrArrayLayers: 1 },
+    { width: datau.width, height: datau.height, depthOrArrayLayers: 1 },
   );
   device.queue.writeTexture(
     {
@@ -256,12 +260,13 @@ async function draw() {
     },
     datav.data,
     { offset: 0, bytesPerRow: datav.width, rowsPerImage: datav.height },
-    { width: datav.height, height: datav.height, depthOrArrayLayers: 1 },
+    { width: datav.width, height: datav.height, depthOrArrayLayers: 1 },
   );
 
   const encoder = device.createCommandEncoder();
 
   const pass = encoder.beginRenderPass({
+    label: "video renderer pass",
     colorAttachments: [{
       view: context.getCurrentTexture().createView(),
       loadOp: "load",
@@ -270,7 +275,7 @@ async function draw() {
   });
 
   pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bind_group);
+  pass.setBindGroup(0, bind_group, [0]);
   pass.draw(6, 1);
 
   pass.end();
