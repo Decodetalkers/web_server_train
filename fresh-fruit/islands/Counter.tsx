@@ -30,11 +30,46 @@ async function loadPlane(src: string) {
   canvas.remove();
   return { data: out, width: img.width, height: img.height };
 }
+async function loadPlaneTwo(src: string, src2: string) {
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, img.width, img.height);
+  const img2 = new Image();
+  img2.src = src2;
+  await img2.decode();
+
+  const canvas2 = document.createElement("canvas");
+  canvas2.width = img2.width;
+  canvas2.height = img2.height;
+
+  const ctx2 = canvas2.getContext("2d")!;
+  ctx2.drawImage(img, 0, 0);
+
+  const imageData2 = ctx.getImageData(0, 0, img2.width, img2.height);
+  // Extract R channel → 1 byte per pixel
+  const out = new Uint8Array(img.width * img.height * 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i * 2] = imageData.data[i * 4];
+    out[i * 2 + 1] = imageData2.data[i * 4];
+  }
+
+  canvas.remove();
+  canvas2.remove();
+  return { data: out, width: img.width, height: img.height };
+}
 
 async function draw() {
   const datay = await loadPlane("/cat-y.jpg");
-  const datau = await loadPlane("/cat-u.jpg");
-  const datav = await loadPlane("/cat-v.jpg");
+  const datauv = await loadPlaneTwo("/cat-u.jpg", "/cat-v.jpg");
 
   const canvas = document.getElementById("video") as HTMLCanvasElement;
 
@@ -71,31 +106,17 @@ async function draw() {
     usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
     viewFormats: [],
   });
-  const texture_u = device.createTexture({
-    label: "u",
+  const texture_uv = device.createTexture({
+    label: "uv",
     size: {
-      width: datau.width,
-      height: datau.height,
+      width: datauv.width,
+      height: datauv.height,
       depthOrArrayLayers: 1,
     },
     mipLevelCount: 1,
     sampleCount: 1,
     dimension: "2d",
-    format: "r8unorm",
-    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
-    viewFormats: [],
-  });
-  const texture_v = device.createTexture({
-    label: "v",
-    size: {
-      width: datav.width,
-      height: datav.height,
-      depthOrArrayLayers: 1,
-    },
-    mipLevelCount: 1,
-    sampleCount: 1,
-    dimension: "2d",
-    format: "r8unorm",
+    format: "rg8unorm",
     usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
     viewFormats: [],
   });
@@ -105,16 +126,12 @@ async function draw() {
     aspect: "all",
     baseMipLevel: 0,
   });
-  const view_u = texture_u.createView({
-    label: "u texture view",
+  const view_uv = texture_uv.createView({
+    label: "uv texture view",
     aspect: "all",
     baseMipLevel: 0,
   });
-  const view_v = texture_v.createView({
-    label: "v texture view",
-    aspect: "all",
-    baseMipLevel: 0,
-  });
+
   const instance = device.createBuffer({
     label: "yuv uniform buffer",
     size: uniform.byteLength,
@@ -144,24 +161,16 @@ async function draw() {
           multisampled: false,
         },
       },
+
       {
         binding: 2,
-        visibility: GPUShaderStage.FRAGMENT,
-        texture: {
-          sampleType: "float",
-          viewDimension: "2d",
-          multisampled: false,
-        },
-      },
-      {
-        binding: 3,
         visibility: GPUShaderStage.FRAGMENT,
         sampler: {
           type: "filtering",
         },
       },
       {
-        binding: 4,
+        binding: 3,
         visibility: GPUShaderStage.VERTEX,
         buffer: {
           type: "uniform",
@@ -215,11 +224,10 @@ async function draw() {
     layout: bg0_layout,
     entries: [
       { binding: 0, resource: view_y },
-      { binding: 1, resource: view_u },
-      { binding: 2, resource: view_v },
-      { binding: 3, resource: sampler },
+      { binding: 1, resource: view_uv },
+      { binding: 2, resource: sampler },
       {
-        binding: 4,
+        binding: 3,
         resource: {
           buffer: instance,
           offset: 0,
@@ -242,25 +250,14 @@ async function draw() {
   );
   device.queue.writeTexture(
     {
-      texture: texture_u,
+      texture: texture_uv,
       mipLevel: 0,
       origin: { x: 0, y: 0, z: 0 },
       aspect: "all",
     },
-    datau.data,
-    { offset: 0, bytesPerRow: datau.width, rowsPerImage: datau.height },
-    { width: datau.width, height: datau.height, depthOrArrayLayers: 1 },
-  );
-  device.queue.writeTexture(
-    {
-      texture: texture_v,
-      mipLevel: 0,
-      origin: { x: 0, y: 0, z: 0 },
-      aspect: "all",
-    },
-    datav.data,
-    { offset: 0, bytesPerRow: datav.width, rowsPerImage: datav.height },
-    { width: datav.width, height: datav.height, depthOrArrayLayers: 1 },
+    datauv.data,
+    { offset: 0, bytesPerRow: datauv.width * 2, rowsPerImage: datauv.height },
+    { width: datauv.width, height: datauv.height, depthOrArrayLayers: 1 },
   );
 
   const encoder = device.createCommandEncoder();

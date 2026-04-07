@@ -11,15 +11,12 @@ struct Uniforms {
 var tex_y: texture_2d<f32>;
 
 @group(0) @binding(1)
-var tex_u: texture_2d<f32>;
+var tex_uv: texture_2d<f32>;
 
 @group(0) @binding(2)
-var tex_v: texture_2d<f32>;
-
-@group(0) @binding(3)
 var s: sampler;
 
-@group(0) @binding(4)
+@group(0) @binding(3)
 var<uniform> uniforms: Uniforms;
 
 @vertex
@@ -50,8 +47,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var yuv = vec3<f32>(0.0);
     yuv.x = (textureSample(tex_y, s, in.uv).r - 0.0625) / 0.8588;
-    yuv.y = (textureSample(tex_u, s, in.uv).r - 0.5) / 0.8784;
-    yuv.z = (textureSample(tex_v, s, in.uv).g - 0.5) / 0.8784;
+    yuv.y = (textureSample(tex_uv, s, in.uv).r - 0.5) / 0.8784;
+    yuv.z = (textureSample(tex_uv, s, in.uv).g - 0.5) / 0.8784;
 
     var rgb = clamp(yuv * yuv2rgb, vec3<f32>(0), vec3<f32>(1));
 
