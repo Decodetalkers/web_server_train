@@ -43,6 +43,7 @@ async function loadPlaneTwo(src: string, src2: string) {
   ctx.drawImage(img, 0, 0);
 
   const imageData = ctx.getImageData(0, 0, img.width, img.height);
+
   const img2 = new Image();
   img2.src = src2;
   await img2.decode();
@@ -52,12 +53,12 @@ async function loadPlaneTwo(src: string, src2: string) {
   canvas2.height = img2.height;
 
   const ctx2 = canvas2.getContext("2d")!;
-  ctx2.drawImage(img, 0, 0);
+  ctx2.drawImage(img2, 0, 0);
 
-  const imageData2 = ctx.getImageData(0, 0, img2.width, img2.height);
+  const imageData2 = ctx2.getImageData(0, 0, img2.width, img2.height);
   // Extract R channel → 1 byte per pixel
   const out = new Uint8Array(img.width * img.height * 2);
-  for (let i = 0; i < out.length; i++) {
+  for (let i = 0; i < img.width * img.height; i++) {
     out[i * 2] = imageData.data[i * 4];
     out[i * 2 + 1] = imageData2.data[i * 4];
   }
@@ -87,10 +88,10 @@ async function draw() {
 
   const uniform = new Float32Array(256 / 4);
   uniform.set([
-    -1 * datay.width / 2,
-    -1 * datay.height / 2,
-    datay.width / 2,
-    datay.height / 2,
+    0,
+    0,
+    datay.width,
+    datay.height,
   ]);
 
   const texture_y = device.createTexture({
