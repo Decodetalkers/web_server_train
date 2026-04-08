@@ -86,12 +86,13 @@ async function draw() {
     code: shader,
   });
 
+  // TODO: need to be fixed
   const uniform = new Float32Array(256 / 4);
   uniform.set([
-    0,
-    0,
-    datay.width,
-    datay.height,
+    -1,
+    -1,
+    1,
+    1,
   ]);
 
   const texture_y = device.createTexture({
