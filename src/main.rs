@@ -128,36 +128,21 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
     .await
     .unwrap();
 
-    while let Some(data) = frame_rx.recv().await {
-        if socket
-            .send(Message::Binary(Bytes::from(data)))
-            .await
-            .is_err()
-        {
-            println!("client {who} abruptly disconnected");
-            return;
-        }
-    }
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
     let (mut sender, mut receiver) = socket.split();
 
     // Spawn a task that will push several messages to the client (does not matter what client does)
     let mut send_task = tokio::spawn(async move {
-        let n_msg = 20;
-        for i in 0..n_msg {
-            // In case of any websocket error, we exit.
+        while let Some(data) = frame_rx.recv().await {
             if sender
-                .send(Message::Text(format!("Server message {i} ...").into()))
+                .send(Message::Binary(Bytes::from(data)))
                 .await
                 .is_err()
             {
-                return i;
+                println!("client {who} abruptly disconnected");
             }
-
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         }
-
         println!("Sending close to {who}...");
         if let Err(e) = sender
             .send(Message::Close(Some(CloseFrame {
@@ -168,7 +153,6 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
         {
             println!("Could not send Close due to {e}, probably it is ok?");
         }
-        n_msg
     });
 
     // This second task will receive messages from client and print them on server console
@@ -188,7 +172,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
     tokio::select! {
         rv_a = (&mut send_task) => {
             match rv_a {
-                Ok(a) => println!("{a} messages sent to {who}"),
+                Ok(_) => println!(" messages sent to {who}"),
                 Err(a) => println!("Error sending messages {a:?}")
             }
             recv_task.abort();
