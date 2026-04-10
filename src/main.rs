@@ -1,20 +1,4 @@
-//! Example websocket server.
-//!
-//! Run the server with
-//! ```not_rust
-//! cargo run -p example-websockets --bin example-websockets
-//! ```
-//!
-//! Run a browser client with
-//! ```not_rust
-//! firefox http://localhost:3000
-//! ```
-//!
-//! Alternatively you can run the rust client (showing two
-//! concurrent websocket connections being established) with
-//! ```not_rust
-//! cargo run -p example-websockets --bin example-client
-//! ```
+mod pw_backend;
 
 use axum::{
     Router,
@@ -136,22 +120,24 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
         }
     }
 
-    // Since each client gets individual statemachine, we can pause handling
-    // when necessary to wait for some external event (in this case illustrated by sleeping).
-    // Waiting for this client to finish getting its greetings does not prevent other clients from
-    // connecting to server and receiving their greetings.
-    for i in 1..5 {
+    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(100);
+
+    let _handle = pw_backend::connect_pw(move |frame| {
+        frame_tx.blocking_send(frame.to_data()).unwrap();
+    })
+    .await
+    .unwrap();
+
+    while let Some(data) = frame_rx.recv().await {
         if socket
-            .send(Message::Text(format!("Hi {i} times!").into()))
+            .send(Message::Binary(Bytes::from(data)))
             .await
             .is_err()
         {
             println!("client {who} abruptly disconnected");
             return;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
     let (mut sender, mut receiver) = socket.split();

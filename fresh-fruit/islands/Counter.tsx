@@ -1,5 +1,4 @@
-import { type Signal, useSignal } from "@preact/signals";
-import { Button } from "../components/Button.tsx";
+import { type Signal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 
 import shader from "./shader.wgsl?raw";
@@ -7,70 +6,35 @@ import shader from "./shader.wgsl?raw";
 interface CounterProps {
   count: Signal<number>;
 }
-async function loadPlane(src: string) {
-  const img = new Image();
-  img.src = src;
-  await img.decode();
 
-  const canvas = document.createElement("canvas");
-  canvas.width = img.width;
-  canvas.height = img.height;
+type FrameMessage = {
+  width: number;
+  height: number;
+  y_image: Uint8Array;
+  uv_image: Uint8Array;
+};
 
-  const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(img, 0, 0);
-
-  const imageData = ctx.getImageData(0, 0, img.width, img.height);
-
-  // Extract R channel → 1 byte per pixel
-  const out = new Uint8Array(img.width * img.height);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = imageData.data[i * 4];
-  }
-
-  canvas.remove();
-  return { data: out, width: img.width, height: img.height };
-}
-async function loadPlaneTwo(src: string, src2: string) {
-  const img = new Image();
-  img.src = src;
-  await img.decode();
-
-  const canvas = document.createElement("canvas");
-  canvas.width = img.width;
-  canvas.height = img.height;
-
-  const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(img, 0, 0);
-
-  const imageData = ctx.getImageData(0, 0, img.width, img.height);
-
-  const img2 = new Image();
-  img2.src = src2;
-  await img2.decode();
-
-  const canvas2 = document.createElement("canvas");
-  canvas2.width = img2.width;
-  canvas2.height = img2.height;
-
-  const ctx2 = canvas2.getContext("2d")!;
-  ctx2.drawImage(img2, 0, 0);
-
-  const imageData2 = ctx2.getImageData(0, 0, img2.width, img2.height);
-  // Extract R channel → 1 byte per pixel
-  const out = new Uint8Array(img.width * img.height * 2);
-  for (let i = 0; i < img.width * img.height; i++) {
-    out[i * 2] = imageData.data[i * 4];
-    out[i * 2 + 1] = imageData2.data[i * 4];
-  }
-
-  canvas.remove();
-  canvas2.remove();
-  return { data: out, width: img.width, height: img.height };
+function decodeBytes(bytes: Uint8Array): FrameMessage {
+  const width_1 = bytes[0];
+  const width_2 = bytes[1];
+  const width = (width_1 << 8) + width_2;
+  const height_1 = bytes[2];
+  const height_2 = bytes[3];
+  const height = (height_1 << 8) + height_2;
+  const image = bytes.slice(4);
+  const y_image = image.slice(0, width * height);
+  const uv_image = image.slice(width * height);
+  return {
+    width,
+    height,
+    y_image,
+    uv_image,
+  };
 }
 
-async function draw() {
-  const datay = await loadPlane("/cat-y.jpg");
-  const datauv = await loadPlaneTwo("/cat-u.jpg", "/cat-v.jpg");
+async function draw(data: Blob) {
+  const bytes = await data.bytes();
+  const { width, height, y_image, uv_image } = decodeBytes(bytes);
 
   const canvas = document.getElementById("video") as HTMLCanvasElement;
 
@@ -86,7 +50,6 @@ async function draw() {
     code: shader,
   });
 
-  // TODO: need to be fixed
   const uniform = new Float32Array(256 / 4);
   uniform.set([
     -1,
@@ -98,8 +61,8 @@ async function draw() {
   const texture_y = device.createTexture({
     label: "y",
     size: {
-      width: datay.width,
-      height: datay.height,
+      width: width,
+      height: height,
     },
     mipLevelCount: 1,
     sampleCount: 1,
@@ -111,8 +74,8 @@ async function draw() {
   const texture_uv = device.createTexture({
     label: "uv",
     size: {
-      width: datauv.width,
-      height: datauv.height,
+      width: width / 2,
+      height: height / 2,
       depthOrArrayLayers: 1,
     },
     mipLevelCount: 1,
@@ -246,9 +209,9 @@ async function draw() {
       origin: { x: 0, y: 0, z: 0 },
       aspect: "all",
     },
-    datay.data,
-    { offset: 0, bytesPerRow: datay.width, rowsPerImage: datay.height },
-    { width: datay.width, height: datay.height, depthOrArrayLayers: 1 },
+    new Uint8Array(y_image),
+    { offset: 0, bytesPerRow: width, rowsPerImage: height },
+    { width: width, height: height, depthOrArrayLayers: 1 },
   );
   device.queue.writeTexture(
     {
@@ -257,9 +220,9 @@ async function draw() {
       origin: { x: 0, y: 0, z: 0 },
       aspect: "all",
     },
-    datauv.data,
-    { offset: 0, bytesPerRow: datauv.width * 2, rowsPerImage: datauv.height },
-    { width: datauv.width, height: datauv.height, depthOrArrayLayers: 1 },
+    new Uint8Array(uv_image),
+    { offset: 0, bytesPerRow: width, rowsPerImage: height / 2 },
+    { width: width / 2, height: height / 2, depthOrArrayLayers: 1 },
   );
 
   const encoder = device.createCommandEncoder();
@@ -282,35 +245,29 @@ async function draw() {
   device.queue.submit([encoder.finish()]);
 }
 
-export default function Counter(props: CounterProps) {
-  const title = useSignal("default");
-
+export default function Counter(_props: CounterProps) {
   useEffect(() => {
-    //const wsUrl = "ws://localhost:3000/ws";
+    const wsUrl = "ws://localhost:3000/ws";
 
-    //const wsListener = new WebSocket(wsUrl);
-    //wsListener.addEventListener("message", (event) => {
-    //  title.value = event.data;
-    //});
-    draw();
+    const wsListener = new WebSocket(wsUrl);
+    wsListener.addEventListener("message", (event) => {
+      if (!(event.data instanceof Blob)) {
+        return;
+      }
+      draw(event.data);
+    });
     return () => {
-      //wsListener.close();
+      wsListener.close();
     };
   }, []);
   return (
     <div class="flex gap-8 py-6">
-      <Button id="decrement" onClick={() => props.count.value -= 1}>-1</Button>
-      <div class="flex-col text-center items-center justify-center mx-20">
-        <p class="text-3xl tabular-nums">{props.count}</p>
-        <p class="text-3xl tabular-nums">{title.value}</p>
-        <canvas
-          id="video"
-          width="512"
-          height="512"
-          class="max-w-full max-h-full"
-        />
-      </div>
-      <Button id="increment" onClick={() => props.count.value += 1}>+1</Button>
+      <canvas
+        id="video"
+        width="1000"
+        height="1000"
+        class="max-w-full max-h-full"
+      />
     </div>
   );
 }

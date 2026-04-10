@@ -14,4 +14,15 @@ headers = "0.4.1"
 tokio = { version = "1.50.0", features = ["full"] }
 tower-http = { version = "0.6.8", features = ["fs", "trace", "cors"] }
 tracing = "0.1.44"
-tracing-subscriber = { version =  "0.3.23", features = ["env-filter"]}
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+ashpd = { version = "0.13.8", default-features = false, features = [
+	"tokio",
+	"pipewire",
+	"screencast",
+	"wayland",
+] }
+
+gstreamer = "0.25.1"
+gstreamer-app = "0.25.0"
+anyhow = "1.0.102"
