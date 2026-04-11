@@ -3,6 +3,11 @@ use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
 };
 
+use axum::{
+    body::Bytes,
+    extract::ws::{Message, WebSocket},
+};
+use futures_util::{SinkExt, stream::SplitSink};
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
@@ -42,12 +47,30 @@ async fn get_path() -> ashpd::Result<(u32, OwnedFd)> {
     Ok((path, fd))
 }
 
+use std::sync::{Arc, Mutex};
+
 #[allow(unused)]
 #[derive(Debug)]
 pub struct Handle {
     bus: gst::Bus,
     source: gst::Bin,
     fd: OwnedFd,
+    frame: Arc<Mutex<Option<Vec<u8>>>>,
+}
+
+impl Handle {
+    pub async fn roundtrip(&self, sender: &mut SplitSink<WebSocket, Message>) -> anyhow::Result<()> {
+        let Some(Some(data)) = self
+            .frame
+            .lock()
+            .ok()
+            .map(|message| message.as_ref().cloned())
+        else {
+            return Ok(());
+        };
+        sender.send(Message::Binary(Bytes::from(data))).await?;
+        Ok(())
+    }
 }
 
 impl Drop for Handle {
@@ -73,10 +96,7 @@ impl<'a> Frame<'a> {
     }
 }
 
-pub async fn connect_pw<D>(mut callback: D) -> anyhow::Result<Handle>
-where
-    D: FnMut(Frame) + Send + 'static,
-{
+pub async fn connect_pw() -> anyhow::Result<Handle> {
     let (path, fd) = get_path().await?;
     gst::init()?;
 
@@ -98,6 +118,9 @@ where
         .caps(&app_sink_caps)
         .build();
 
+    let frame = Arc::new(Mutex::new(None));
+    let frame_2 = frame.clone();
+
     app_sink.set_callbacks(
         gst_app::AppSinkCallbacks::builder()
             .new_sample(move |sink| {
@@ -112,11 +135,14 @@ where
                 let height = s.get::<i32>("height").map_err(|_| gst::FlowError::Error)?;
                 let width = width as i16;
                 let height = height as i16;
-                callback(Frame {
-                    width: [(width >> 8) as u8, width as u8],
-                    height: [(height >> 8) as u8, height as u8],
-                    data: map.as_slice(),
-                });
+                *frame_2.lock().unwrap() = Some(
+                    Frame {
+                        width: [(width >> 8) as u8, width as u8],
+                        height: [(height >> 8) as u8, height as u8],
+                        data: map.as_slice(),
+                    }
+                    .to_data(),
+                );
 
                 Ok(gst::FlowSuccess::Ok)
             })
@@ -134,5 +160,6 @@ where
         bus: source.bus().unwrap(),
         source: source.into(),
         fd,
+        frame,
     })
 }
