@@ -1,20 +1,4 @@
-//! Example websocket server.
-//!
-//! Run the server with
-//! ```not_rust
-//! cargo run -p example-websockets --bin example-websockets
-//! ```
-//!
-//! Run a browser client with
-//! ```not_rust
-//! firefox http://localhost:3000
-//! ```
-//!
-//! Alternatively you can run the rust client (showing two
-//! concurrent websocket connections being established) with
-//! ```not_rust
-//! cargo run -p example-websockets --bin example-client
-//! ```
+mod pw_backend;
 
 use axum::{
     Router,
@@ -136,21 +120,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
         }
     }
 
-    // Since each client gets individual statemachine, we can pause handling
-    // when necessary to wait for some external event (in this case illustrated by sleeping).
-    // Waiting for this client to finish getting its greetings does not prevent other clients from
-    // connecting to server and receiving their greetings.
-    for i in 1..5 {
-        if socket
-            .send(Message::Text(format!("Hi {i} times!").into()))
-            .await
-            .is_err()
-        {
-            println!("client {who} abruptly disconnected");
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
+    let handle = pw_backend::connect_pw().await.unwrap();
 
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
@@ -158,20 +128,9 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
 
     // Spawn a task that will push several messages to the client (does not matter what client does)
     let mut send_task = tokio::spawn(async move {
-        let n_msg = 20;
-        for i in 0..n_msg {
-            // In case of any websocket error, we exit.
-            if sender
-                .send(Message::Text(format!("Server message {i} ...").into()))
-                .await
-                .is_err()
-            {
-                return i;
-            }
-
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        while handle.roundtrip(&mut sender).await.is_ok() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-
         println!("Sending close to {who}...");
         if let Err(e) = sender
             .send(Message::Close(Some(CloseFrame {
@@ -182,7 +141,6 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
         {
             println!("Could not send Close due to {e}, probably it is ok?");
         }
-        n_msg
     });
 
     // This second task will receive messages from client and print them on server console
@@ -202,7 +160,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
     tokio::select! {
         rv_a = (&mut send_task) => {
             match rv_a {
-                Ok(a) => println!("{a} messages sent to {who}"),
+                Ok(_) => println!(" messages sent to {who}"),
                 Err(a) => println!("Error sending messages {a:?}")
             }
             recv_task.abort();
