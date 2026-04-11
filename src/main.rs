@@ -129,7 +129,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
     // Spawn a task that will push several messages to the client (does not matter what client does)
     let mut send_task = tokio::spawn(async move {
         while handle.roundtrip(&mut sender).await.is_ok() {
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         println!("Sending close to {who}...");
         if let Err(e) = sender
