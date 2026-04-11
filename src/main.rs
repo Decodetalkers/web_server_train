@@ -120,13 +120,7 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
         }
     }
 
-    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(100);
-
-    let _handle = pw_backend::connect_pw(move |frame| {
-        frame_tx.blocking_send(frame.to_data()).unwrap();
-    })
-    .await
-    .unwrap();
+    let handle = pw_backend::connect_pw().await.unwrap();
 
     // By splitting socket we can send and receive at the same time. In this example we will send
     // unsolicited messages to client based on some sort of server's internal event (i.e .timer).
@@ -134,14 +128,8 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr) {
 
     // Spawn a task that will push several messages to the client (does not matter what client does)
     let mut send_task = tokio::spawn(async move {
-        while let Some(data) = frame_rx.recv().await {
-            if sender
-                .send(Message::Binary(Bytes::from(data)))
-                .await
-                .is_err()
-            {
-                println!("client {who} abruptly disconnected");
-            }
+        while handle.roundtrip(&mut sender).await.is_ok() {
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
         println!("Sending close to {who}...");
         if let Err(e) = sender
