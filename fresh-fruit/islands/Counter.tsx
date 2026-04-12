@@ -90,9 +90,9 @@ async function draw() {
   const uniform = new Float32Array(256 / 4);
   uniform.set([
     -1,
+    1,
+    1,
     -1,
-    1,
-    1,
   ]);
 
   const texture_y = device.createTexture({
